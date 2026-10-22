@@ -108,12 +108,13 @@ matches have a near-zero false-positive rate and are filed automatically. A
 classifier-only hit is filed only when the score clears a strict threshold or
 something corroborates it, such as several independent reports. Filing every
 classifier hit would bury NCMEC in reports it cannot use and teach it to
-discount ours. Providers that report in good faith are protected from
-liability (18 U.S.C. §2258B), but that protection does not cover reckless
-disregard, and knowingly filing a high volume of false positives could come
-close to it. Whether a classifier score alone counts as the "actual
-knowledge" that triggers the duty to report, and where the threshold sits,
-are for counsel to settle before launch. Either way, the item is hidden.
+discount ours. Providers are protected from liability for their reports (18
+U.S.C. §2258B) unless they act with intentional misconduct, actual malice, or
+reckless disregard of a risk of physical injury, so the concern with false
+positives is usefulness rather than liability. Whether the checking service
+counts as a provider at all, whether a classifier score alone counts as the
+"actual knowledge" that triggers the duty to report, and where the threshold
+sits, are for counsel to settle before launch.
 
 A scanned upload gets the same check and the same outcomes as a reported one.
 
@@ -178,11 +179,9 @@ and entries for items already tombstoned can be pruned.
 
 Pushing a verdict to subscribers is fast. The slow step is the service
 fetching the reported bytes, since a network GET can currently take far longer
-than a few seconds. If that proves too slow, the reporter's client could attach
-the bytes, encrypted to the service. That works only if the app identifies
-items by a content hash recorded in its contract, so the service can confirm
-the bytes are the item at that locator with a small read instead of a large
-fetch.
+than a few seconds. Reporters must not attach the bytes themselves: that would
+have users sending the material to a private party, which the law permits
+only towards law enforcement.
 
 ## Sharing removal decisions across apps (draft, possibly not v1)
 
