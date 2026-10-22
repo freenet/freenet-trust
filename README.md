@@ -24,16 +24,20 @@ and video are where this matters most.
 Most Freenet apps are built by individuals or small teams, often pseudonymous,
 who cannot build moderation infrastructure from scratch. This project aims to
 give them a small kit that meets the requirement: a report button, a checking
-service that confirms or rejects a report within seconds, and a feed the app
-subscribes to so that confirmed items disappear from its UI in real time.
+service that confirms or rejects a report within seconds, optional scanning of
+new uploads, and a feed the app subscribes to so that confirmed items
+disappear from its UI in real time.
 
 ## Scope decisions so far
 
-- **Reports, not proactive scanning.** Only items a user has reported are
-  checked. Scanning everything published would cost far more and is deferred
-  (see below).
-- **Reports are checked automatically, and nobody looks at reported
-  material.** The checking service matches reported files against vetted
+- **Reports are free; scanning needs a ghost key.** Ghost keys gate services
+  that consume resources, and scanning is one. Anyone may report an item,
+  with a ghost key or proof-of-work, because reporting illegal material
+  should never cost money. Scanning new uploads before anyone reports them
+  costs the service a check per upload, so a scan request must be signed by a
+  [ghost key](https://freenet.org/ghostkey/), and the service limits scans
+  per key.
+- **Items are checked automatically, and nobody looks at the material.** The checking service matches reported files against vetted
   lists of known material and runs a purpose-built image classifier. No
   person and no general-purpose AI model views the material: we will not ask
   anyone to do that. Because a report carries no identifying information
@@ -110,6 +114,28 @@ disregard, and knowingly filing a high volume of false positives could come
 close to it. Whether a classifier score alone counts as the "actual
 knowledge" that triggers the duty to report, and where the threshold sits,
 are for counsel to settle before launch. Either way, the item is hidden.
+
+A scanned upload gets the same check and the same outcomes as a reported one.
+
+### Proactive scanning
+
+An app can ask the service to scan new uploads instead of waiting for a
+report. The scan request is signed by the submitter's ghost key, and the
+service limits how many scans each key may request, weighting the limit by
+the key's donation amount and age. The service runs off-network and can read
+a clock, so this limit can be an ordinary rate limit, unlike the clock-free
+caps contracts need.
+
+The submitter is whoever moderates the space, not the uploader: a bad
+uploader would simply skip a scan of their own upload. For River, the room
+owner's node (for example a moderation delegate, using scheduled wake-ups)
+submits new media in the room. Scan volume then follows uploads, and the
+limit attaches to the moderator's key.
+
+In a private, encrypted space, scanning means sending decrypted bytes to the
+service. That is the owner's choice to make, and members should be told it is
+on. An owner who does not want that can still use exact-hash checks (see
+"Sharing removal decisions across apps"), which reveal nothing to the service.
 
 ### Reporting to NCMEC
 
@@ -190,10 +216,10 @@ can block re-uploads of the same file.
 
 ## Cost
 
-Checking a reported image is cheap: a hash lookup and one classifier run.
-Volume follows reports, not uploads, so the service's running cost is small
-unless reporting is abused, and the ghost-key or proof-of-work gate bounds
-that. Fees for vetted detection services are not yet known. Cross-app checks
+Checking an image is cheap: a hash lookup and one classifier run. Report
+volume is bounded by the ghost-key or proof-of-work gate. Scan volume follows
+uploads and is the larger cost, which is why each scan needs a ghost key and
+each key has a limit. Fees for vetted detection services are not yet known. Cross-app checks
 are cheap too: an oblivious PRF evaluation is about one elliptic-curve
 multiplication, so a million checks costs about a minute of CPU. The main
 cost there is the network traffic of carrying checks through contracts, which
@@ -201,10 +227,6 @@ is why they are batched and made per upload rather than per view.
 
 ## Explored and deferred
 
-- **Proactive scanning** of everything published, not only reported items:
-  technically feasible, but it costs far more and would multiply NCMEC
-  filings, most of them not actionable. Revisit once reporting has run for a
-  while.
 - **Perceptual hashes** (PDQ for images, TMK+PDQF or vPDQ for video) catch
   modified re-uploads. They cannot use an oblivious exact-match check, they
   can leak image content (PhotoDNA has been shown to be invertible to
@@ -216,6 +238,8 @@ is why they are batched and made per upload rather than per view.
 - With nobody reviewing, how does someone appeal a wrongly hidden item?
 - What threshold or corroboration should a classifier-only hit need before it
   is filed with NCMEC? (A question for counsel.)
+- How many scans should a ghost key get, and how should donation amount and
+  key age weight that?
 - Should v1 include cross-app sharing of removal decisions, or start with
   per-app reporting only?
 - A reporter's ghost-key fingerprint is visible on the report ciphertext and is
