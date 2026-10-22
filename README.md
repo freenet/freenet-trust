@@ -155,6 +155,16 @@ must never be evicted by a cap on the contract's size. Because it is an
 ordinary contract update, every subscribed peer applies it within seconds,
 including the checking service's own node, which fetched the item to check it.
 
+UIs update in real time. A UI showing an item is subscribed to the contract
+that holds it, so the tombstone reaches it as an ordinary update
+notification. The shared crate gives UIs a way to recognise a tombstone from
+this service, as distinct from one the app's own moderator wrote, and to read
+its reason. On receiving one, the UI removes the item from the page at once,
+including any copy already rendered or cached in memory, and can show a
+placeholder such as "Removed: matched known illegal material". A UI that only
+fetched the contract once, without subscribing, sees the removal on its next
+read, so UIs that display reportable content should subscribe.
+
 Two limits remain. A peer that holds an old copy and never syncs again keeps
 the bytes. And between fetching an item and tombstoning it, the service's
 node holds the item for a few seconds. Users should be told the item was
