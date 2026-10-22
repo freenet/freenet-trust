@@ -30,16 +30,17 @@ from the app's screen.
 
 ## Scope decisions so far
 
-- **Reports and scans need a ghost key.** Ghost keys gate services that
-  consume resources, and checking is one. Every check costs the service a
-  fetch, whether a report or a scan triggered it, and a free check would let
-  an offender test altered files until one passes. So reports and scan
-  requests to the checking service must be signed by a
+- **Ghost keys are the way to report; proof-of-work is a slow fallback.**
+  Ghost keys gate services that consume resources, and checking is one.
+  Every check costs the service a fetch, whether a report or a scan triggered
+  it, and a free check would let an offender test altered files until one
+  passes. So a report to the checking service is signed by a
   [ghost key](https://freenet.org/ghostkey/), and the service limits checks
-  per key. Proof-of-work is not accepted: hardware makes it cheap for exactly
-  the people it should stop. Reporting illegal material still never costs
-  money: anyone can report to NCMEC's CyberTipline directly, or to the app's
-  own moderator.
+  per key. A user without one can instead solve a proof-of-work puzzle that
+  takes several minutes on an ordinary computer, so that reporting illegal
+  material never costs money. The wait also gives a would-be false reporter
+  time to reconsider. Scan requests need a ghost key; there is no
+  proof-of-work fallback for scanning.
 - **The service acts automatically, and only on known material.** It matches
   files against vetted lists of material already identified by organisations
   such as NCMEC and IWF. No person and no AI model views the material: we
@@ -71,9 +72,16 @@ from the app's screen.
    room's owner. For suspected child sexual abuse material, the report UI also
    links to [NCMEC's CyberTipline](https://report.cybertip.org), so material
    that is not yet on any list reaches people trained to review it.
-2. **Reports to the checking service are signed by a ghost key.** A user
-   without one is offered the free routes instead: the CyberTipline link and
-   the app's moderator. The report inbox enforces clock-free caps, such as a
+2. **Reports to the checking service are signed by a ghost key, or carry a
+   proof-of-work.** The UI offers the ghost key first and shows the
+   proof-of-work as the slower alternative, alongside the free CyberTipline
+   link. The puzzle is memory-hard (for example Argon2id), so that GPUs and
+   custom hardware gain little over an ordinary computer, and it is bound to
+   the report's ciphertext, so one solution cannot be reused for another
+   report. The inbox contract verifies it, since checking a solution is
+   deterministic. Proof-of-work reports draw on a shared hourly budget that
+   the service sets, so they cannot exhaust it, and ghost-key reports never
+   wait behind them. The report inbox enforces clock-free caps, such as a
    limit on open reports per key, because contracts cannot read the clock;
    the service applies ordinary rate limits on top.
 3. **A report never removes anything by itself.** The check decides. A flood
@@ -240,9 +248,9 @@ can block re-uploads of the same file.
 ## Cost
 
 Checking an image is cheap: a hash computation and a lookup. Fetching the
-item, especially video, costs more than the check. Report volume and scan
-volume are both bounded by the ghost-key gate and the per-key limit. Scan
-volume follows uploads and is the larger of the two. Fees for vetted detection services are not yet known. Cross-app checks
+item, especially video, costs more than the check. Ghost-key reports and
+scans are bounded by the per-key limit, and proof-of-work reports by their
+shared budget. Scan volume follows uploads and is the largest. Fees for vetted detection services are not yet known. Cross-app checks
 are cheap too: an oblivious PRF evaluation is about one elliptic-curve
 multiplication, so a million checks costs about a minute of CPU. The main
 cost there is the network traffic of carrying checks through contracts, which
@@ -277,8 +285,11 @@ is why they are batched and made per upload rather than per view.
   vendors' answers in writing.
 - Does the checking service count as a provider under the law, and what
   follows if it does not? (A question for counsel.)
-- A ghost key limits how many altered files an offender can test, but does
-  not stop it. Should the service also add random delay before acting, so a
+- How hard should the proof-of-work be, and how large its shared budget?
+  Fast hardware still solves it somewhat faster than a phone does, and when
+  the budget is spent, users without a ghost key have to wait.
+- A ghost key or a proof-of-work limits how many altered files an offender
+  can test, but does not stop it. Should the service also add random delay before acting, so a
   result is harder to tie to a test?
 - A report made only to NCMEC never reaches the checking service, so once
   NCMEC confirms the file, nothing here knows where it is on Freenet unless
