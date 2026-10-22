@@ -186,6 +186,68 @@ content should subscribe.
 A peer that holds an old copy and never syncs again keeps the bytes. Users
 should be told an item was removed, not that it was erased from every disk.
 
+## App integration (draft)
+
+### What an app gets
+
+- A report button on any item, with the ghost-key path, the proof-of-work
+  fallback, a reason only the moderator can read, and the CyberTipline link.
+- Hiding within seconds once reports pass the app's threshold.
+- A moderator queue of disputed items, with restore and remove.
+- Automatic removal of reported items nobody disputes, without anyone looking
+  at them.
+- Removal from the network by tombstone, with real-time updates in every open
+  UI.
+- Reporters' reputation from every app, from day one.
+
+### What an app does
+
+1. **Accepts tombstones in its content contract**, using the shared crate,
+   from moderation keys that the space's owner has authorised. This is the
+   only change to the app's own contract code. It re-keys the contract like
+   any contract change, so it is easiest to build in from v1. Identifying items
+   by a content hash also allows blocking re-uploads.
+2. **Creates a report contract per space**, from a generic contract this
+   project provides.
+3. **Adds the UI components**: the report flow, hiding, tombstone placeholders
+   and the moderator queue. A Rust library comes first (River's UI is Dioxus),
+   then a TypeScript package.
+4. **Chooses whose rulings count toward reputation**, or accepts the default.
+
+The app writes no delegate.
+
+### Delegates
+
+- **Reporters use the existing ghostkeys delegate.** It already signs for
+  third-party apps, shows its own consent prompt, and gives them only a
+  restricted scope, so apps build no permission flow. Its key changes with
+  every release, so apps find it through its
+  [pointer record](https://github.com/freenet/ghostkeys/blob/main/FREENET.md),
+  never a hard-coded key. The proof-of-work runs in the browser.
+- **Moderators use a shared moderation delegate that this project
+  publishes**, a platform delegate like ghostkeys, found the same way through
+  a pointer record. It holds the moderation key, which decrypts report reasons
+  and signs rulings and tombstones, and it runs automatic confirmation on
+  scheduled wake-ups once the moderator grants it Background. That needs
+  freenet-stdlib 0.12.1 or later.
+- **The moderation key is the delegate's own.** A delegate running in the
+  background cannot message another delegate, so it cannot borrow a key held
+  by the app's delegate, such as a River room owner's. Instead the owner signs
+  a one-time authorisation: "this key may moderate my space".
+- **Testing needs a real node.** `freenet local` does not service a delegate's
+  contract requests, and wake-ups do not fire there.
+
+### Limits
+
+- Automatic confirmation runs only while the moderator's node is running. If
+  it is offline, removal waits.
+- Where each user owns the contract that holds their content (a blog per user,
+  for example), the moderator cannot tombstone unless those contracts accept
+  the moderation key. Hiding is then all the system can do.
+- Computing reputation from every honoured issuer's full ruling history gets
+  expensive as histories grow. Issuers should probably publish compact,
+  signed reputation summaries for UIs to read instead.
+
 ## Sharing removal decisions across apps (draft, possibly not v1)
 
 When a moderator removes something as illegal, the decision can be published
