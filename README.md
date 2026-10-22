@@ -37,9 +37,9 @@ from the app's screen.
   passes. So a report to the checking service is signed by a
   [ghost key](https://freenet.org/ghostkey/), and the service limits checks
   per key. A user without one can instead solve a proof-of-work puzzle that
-  takes several minutes on an ordinary computer, so that reporting illegal
+  takes about a minute on typical hardware, so that reporting illegal
   material never costs money. The wait also gives a would-be false reporter
-  time to reconsider. Scan requests need a ghost key; there is no
+  time to reconsider, and it is the natural moment to offer a ghost key. Scan requests need a ghost key; there is no
   proof-of-work fallback for scanning.
 - **The service acts automatically, and only on known material.** It matches
   files against vetted lists of material already identified by organisations
@@ -73,9 +73,10 @@ from the app's screen.
    links to [NCMEC's CyberTipline](https://report.cybertip.org), so material
    that is not yet on any list reaches people trained to review it.
 2. **Reports to the checking service are signed by a ghost key, or carry a
-   proof-of-work.** The UI offers the ghost key first and shows the
-   proof-of-work as the slower alternative, alongside the free CyberTipline
-   link. The puzzle is memory-hard (for example Argon2id), so that GPUs and
+   proof-of-work.** A user with a ghost key reports at once. Otherwise the
+   UI starts the puzzle and shows its progress, with "Skip the wait with a
+   ghost key" beside it, and the free CyberTipline link. The puzzle is
+   memory-hard (for example Argon2id), so that GPUs and
    custom hardware gain little over an ordinary computer, and it is bound to
    the report's ciphertext, so one solution cannot be reused for another
    report. The inbox contract verifies it, since checking a solution is
@@ -109,10 +110,15 @@ from the app's screen.
 | Matches a list of known material | At once, by tombstone | Automatically |
 | No match | No | No; the reporter is pointed to the CyberTipline |
 
-Known-material lists and matching tools (for example PhotoDNA with NCMEC and
-IWF hash lists) are available only to vetted organisations, so Freenet Project
-Inc. would apply for access. Perceptual matching (PhotoDNA, PDQ) runs inside
-the service and is never published (see "Explored and deferred").
+One list provider is enough, and the matching software can be open source.
+NCMEC's hash-sharing program gives registered providers PDQ hashes for images
+and MD5 hashes for video. Meta's
+[Hasher-Matcher-Actioner](https://github.com/facebook/ThreatExchange/tree/main/hasher-matcher-actioner)
+(BSD-licensed, runs in Docker) computes PDQ, keeps the lists, matches against
+them, and already includes a client for NCMEC's hash API. So the service needs
+no proprietary matcher such as PhotoDNA, and no other vendor's terms. Other
+lists, such as IWF's, can be added later. The lists and matching stay inside
+the service and are never published (see "Explored and deferred").
 
 An unmatched report is not forgotten. The service keeps the item's locator and
 perceptual hashes, never its bytes, and re-checks them as the lists grow. When
@@ -122,8 +128,12 @@ seconds, but it handles new material without anyone at Freenet viewing it.
 
 Perceptual hashes can be deliberately collided, so a harmless image crafted to
 match a listed one could be removed and reported under its publisher's key.
-To guard against this, a match counts only when two independent algorithms
-agree (for example PhotoDNA and PDQ), or when the file matches exactly.
+NCMEC's list supplies only one perceptual hash for images, so the service
+cannot require two algorithms to agree. Instead it acts only on a PDQ match
+much closer than the usual threshold, or on an exact match. A crafted
+collision that still gets through costs a wrongful removal, and NCMEC's
+analysts reviewing the report see a harmless image, so it harms nobody beyond
+that removal.
 
 Providers are protected from liability for their reports (18 U.S.C. §2258B)
 unless they act with intentional misconduct, actual malice, or reckless
@@ -280,9 +290,11 @@ is why they are batched and made per upload rather than per view.
 
 ## Open questions
 
-- What do PhotoDNA's terms allow? They bar using the cloud service to provide
-  a managed service, which checking for many apps may be. We need the
-  vendors' answers in writing.
+- What do the terms of NCMEC's hash-sharing program allow? In particular,
+  may a registered provider match on behalf of many independent apps? We need
+  NCMEC's answer in writing.
+- How close must a PDQ match be before the service acts, given that a
+  tighter threshold misses more altered copies?
 - Does the checking service count as a provider under the law, and what
   follows if it does not? (A question for counsel.)
 - How hard should the proof-of-work be, and how large its shared budget?
