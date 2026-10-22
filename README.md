@@ -77,11 +77,16 @@ material from the network, mostly without anyone having to look at it.
    the app's moderator. Reports of illegal material then look like any other
    report, so the report list does not work as an index of likely illegal
    material.
-4. **Reports live in a report contract for the space** (for example one per
-   River room). It checks each report's signature or proof-of-work when the
-   report arrives, and caps open reports per key and the number of
-   proof-of-work reports per item. Contracts cannot read the clock, so these
-   caps are counts, not rates.
+4. **Reports live where the app chooses.** Usually that is a generic report
+   contract for the space, keyed by the space's stable id (see "App
+   integration"), so that it survives re-keys of the app's own contracts. In a
+   private, encrypted space, a public report contract would reveal that the
+   space exists and link reporters' ghost keys to it, so the reports live
+   inside the space's own state instead, readable only by members. Either way
+   the shared crate checks each report's signature or proof-of-work when it
+   arrives, and caps open reports per key and the number of proof-of-work
+   reports per item. Contracts cannot read the clock, so these caps are counts,
+   not rates.
 
 ### Hiding
 
@@ -101,8 +106,10 @@ moderator removes it.
 ### Disputes
 
 A dispute says a report is false. It is signed by a ghost key and capped per
-key. Most disputes come from the uploader of a wrongly reported item. A dispute
-never unhides the item. It puts the item in front of the moderator.
+key. Most disputes come from the uploader of a wrongly reported item, and an
+uploader can co-sign the dispute with the key they published the item under,
+to show the moderator it really comes from them. A dispute never unhides the
+item. It puts the item in front of the moderator.
 
 ### Rulings
 
@@ -112,13 +119,17 @@ sides.
 | Ruling | Item | Reporters | Disputers |
 |---|---|---|---|
 | Restore | Unhidden | Lose reputation | Gain reputation |
-| Remove | Tombstoned (see "Removal") | Gain reputation | Lose reputation |
-| Undisputed for N days | Tombstoned automatically | Gain reputation | (none) |
+| Remove | Removed (see "Removal") | Gain reputation | Lose reputation |
+| Undisputed for N days | Removed automatically | Gain reputation | (none) |
 
 The last row is what keeps moderators from having to look at reported
-material. The moderator's delegate, on a scheduled wake-up, tombstones hidden
-items that nobody disputed within the waiting period, and that counts as a
-ruling. Delegates can read the clock, so this works without anyone viewing the
+material. On a scheduled wake-up, the moderator's delegate (or, for an app run
+from a server, the same code in the moderator's daemon) rules "remove" on
+hidden items that nobody disputed within the waiting period. Each space sets
+its own waiting period, and it can be zero: in an app whose items are pointers
+to content elsewhere, such as Atlas's listings, an item that is hidden but not
+yet removed tells anyone reading where reported material is, so such apps
+should remove at once. Delegates can read the clock, so this works without anyone viewing the
 item. Only disputed items need a human decision, and since disputes come
 mostly from wrongly reported uploaders, what moderators end up looking at is
 mostly legitimate content. Someone who uploaded illegal material has little
@@ -129,6 +140,11 @@ A moderator who confirms illegal material on a dispute removes it and reports
 it to the CyberTipline.
 
 Rulings are signed claims, published by the moderator in a rulings contract.
+Each ruling references the reports it decides, so that reputation can be
+updated, and so that anyone can measure how promptly a space's moderator
+acts. A ruling stands even if the item has since dropped out of the app's
+state, as items in busy chat rooms do. A ruling says what the moderator
+decided; what it does to the item is up to the app (see "Removal").
 
 ### Reputation
 
@@ -165,53 +181,99 @@ a delegate.
 
 ### Removal
 
-The moderator removes an item with a tombstone in the contract that holds it.
-A shared crate provides the tombstone type, its verification and its merge
-rule, so apps do not hand-roll them.
+A "remove" ruling is a claim. Each app enforces it in whatever way its content
+allows, and the shared crate supports each of these:
 
-A tombstone keeps the item's id and content hash and drops its bytes. It wins
-every merge, so a peer holding older state cannot bring the item back, and it
-must never be evicted by a cap on the contract's size. Because it is an
-ordinary contract update, every subscribed peer applies it within seconds.
+- **A tombstone in the content contract**, where the app's contract accepts
+  the moderator's key. This is the only kind that takes the bytes off the
+  network. The tombstone keeps the item's reference and drops its bytes, and
+  it wins every merge, so a peer holding older state cannot bring the item
+  back.
+- **Hiding by the app's UI**, from the published ruling, where the content
+  sits in contracts the moderator cannot write to: contracts each author
+  owns, or immutable blobs named by their hash. This is the fallback for any
+  app, and the UI must say "hidden", not "removed".
+- **An app-specific action**, such as banning the author as well, or
+  removing everything that depends on the item, like River's edits and reply
+  previews. The app decides what a ruling implies.
+- **Delisting**, for an index such as Atlas, whose items are pointers to
+  content elsewhere.
+
+**Tombstones are self-verifying and anyone can deliver them.** The moderation
+delegate signs the tombstone and publishes it with the ruling. Any client of
+the app that sees it copies it into the content contract, and the contract
+checks the signature against the moderators it has authorised. The generic
+delegate therefore never needs to know an app's contract keys or update
+format, which change from app to app and on every re-key. Hiding is already
+immediate, so the cost of waiting for a client to deliver the tombstone is
+small.
+
+**Tombstones are kept as long as the contract could otherwise accept the item
+again**, not forever. Apps that drop old content, as River does with old
+messages, need a horizon below which nothing is re-admitted anyway, and the
+tombstone can go once the item is below it.
 
 UIs update in real time. A UI showing an item is subscribed to the contract
-that holds it, so the tombstone reaches it as an ordinary update notification.
-The shared crate gives UIs a way to recognise a tombstone and read its reason.
-On receiving one, the UI removes the item from the page at once, including any
-copy already rendered or cached in memory, and can show a placeholder such as
-"Removed by the moderator". A UI that only fetched the contract once, without
-subscribing, sees the removal on its next read, so UIs that display reportable
-content should subscribe.
+that holds it, so a tombstone reaches it as an ordinary update notification.
+On receiving one, or a ruling it enforces by hiding, the UI removes the item
+from the page at once, including any copy already rendered or cached in
+memory, and can show a placeholder such as "Removed by the moderator". A UI
+that only fetched the contract once sees the removal on its next read, so UIs
+that display reportable content should subscribe.
 
 A peer that holds an old copy and never syncs again keeps the bytes. Users
 should be told an item was removed, not that it was erased from every disk.
 
 ## App integration (draft)
 
+Freenet apps store content in very different ways, so the system makes as few
+assumptions as it can about how an app is built.
+
+### The pieces an app supplies
+
+- **A space.** Whatever the app moderates as a unit: a River room, an Atlas
+  index, a Delta site, a whole marketplace. The app gives it a **stable id**
+  that does not change when the app's contracts re-key, such as the owner's
+  verifying key plus a name. Report and rulings contracts are keyed by it.
+- **Item references.** The app decides how items are identified. The
+  reference is opaque to the system; a digest of at least 128 bits is
+  recommended, so that nobody can make two items share one. A hash of the
+  content is optional: it makes sense for media, where it also blocks
+  re-uploads, but not for text or encrypted content.
+- **Subjects at more than one level.** A report or ruling can be about an
+  item, a whole space (a room, a site), a contract, or a publisher's key.
+  Atlas, for example, needs to act on whole apps, not single files.
+- **A moderation manifest.** A small record, signed by the space's owner key,
+  naming where reports go, where rulings are published, which moderation keys
+  are authorised, and the space's policy (hiding threshold, waiting period).
+  Indexes such as Atlas can then check mechanically that an app has a working
+  removal mechanism, and measure from the public rulings how promptly it is
+  used.
+- **Where moderators are authorised.** In the manifest, or in the app's own
+  owner-signed state, as a River room's configuration would hold it. Either
+  way the shared crate does the checking.
+
 ### What an app gets
 
 - A report button on any item, with the ghost-key path, the proof-of-work
   fallback, a reason only the moderator can read, and the CyberTipline link.
-- Hiding within seconds once reports pass the app's threshold.
+- Hiding within seconds once reports pass the space's threshold.
 - A moderator queue of disputed items, with restore and remove.
 - Automatic removal of reported items nobody disputes, without anyone looking
   at them.
-- Removal from the network by tombstone, with real-time updates in every open
-  UI.
+- Removal from the network, where the app accepts tombstones, and real-time
+  updates in every open UI.
 - Reporters' reputation from every app, from day one.
 
 ### What an app does
 
-1. **Accepts tombstones in its content contract**, using the shared crate,
-   from moderation keys that the space's owner has authorised. This is the
-   only change to the app's own contract code. It re-keys the contract like
-   any contract change, so it is easiest to build in from v1. Identifying items
-   by a content hash also allows blocking re-uploads.
-2. **Creates a report contract per space**, from a generic contract this
-   project provides.
-3. **Adds the UI components**: the report flow, hiding, tombstone placeholders
-   and the moderator queue. A Rust library comes first (River's UI is Dioxus),
-   then a TypeScript package.
+1. **Publishes a moderation manifest** for each space.
+2. **Chooses how removals are enforced**: accepting tombstones in its content
+   contracts (best, and easiest built in from v1, since changing a contract
+   re-keys it), hiding in the UI, or both.
+3. **Adds the UI components**: the report flow, hiding, placeholders and the
+   moderator queue. A Rust library comes first (River's UI is Dioxus), then a
+   TypeScript package.
 4. **Chooses whose rulings count toward reputation**, or accepts the default.
 
 The app writes no delegate.
@@ -229,24 +291,37 @@ The app writes no delegate.
   a pointer record. It holds the moderation key, which decrypts report reasons
   and signs rulings and tombstones, and it runs automatic confirmation on
   scheduled wake-ups once the moderator grants it Background. That needs
-  freenet-stdlib 0.12.1 or later.
+  freenet-stdlib 0.12.1 or later. The same logic is also a library, so an app
+  moderated from a server, as Atlas is, can run it in its own daemon.
 - **The moderation key is the delegate's own.** A delegate running in the
   background cannot message another delegate, so it cannot borrow a key held
-  by the app's delegate, such as a River room owner's. Instead the owner signs
-  a one-time authorisation: "this key may moderate my space".
+  by the app's delegate, such as a River room owner's. The owner authorises it
+  instead. This also means a moderation bot never needs the owner's key.
 - **Testing needs a real node.** `freenet local` does not service a delegate's
   contract requests, and wake-ups do not fire there.
 
+### How current apps fit
+
+| App | Items | Enforcement | Notes |
+|---|---|---|---|
+| River | Messages, inline in the room contract | Tombstone, by adding a moderator-removal field to the room state (a routine re-key) | River's existing purge of direct messages is already this pattern. Moderators authorised in the owner-signed room configuration. Private rooms keep reports in room state. Message ids would use a 128-bit digest rather than River's 64-bit id. |
+| Atlas | Listings pointing at other apps | Tombstone (Atlas owns its index); delisting for whole apps | Waiting period zero. Consumes manifests and rulings to decide which apps to list. |
+| Delta | Pages in a site contract that only the site owner can write | Hiding, plus delisting by indexes, unless sites accept a moderator key | The space is the site; authority above it comes from an index or directory. |
+| Harvest | Listings in a seller's store; photos as immutable contracts named by their hash | Hiding by photo hash | A future image contract with a tombstone slot would allow real removal. |
+| Raven | Posts with content-hash ids, copied into several contracts | Tombstone in the shared contracts; hiding in authors' own shards | A report must reach every contract holding the post. |
+| freenet-git | Repositories, with file contents in immutable pack contracts | Hiding, plus delisting by indexes | Same as Harvest for the packs. |
+
 ### Limits
 
-- Automatic confirmation runs only while the moderator's node is running. If
-  it is offline, removal waits.
-- Where each user owns the contract that holds their content (a blog per user,
-  for example), the moderator cannot tombstone unless those contracts accept
-  the moderation key. Hiding is then all the system can do.
+- Automatic confirmation runs only while the moderator's node or daemon is
+  running. If it is offline, removal waits.
+- Where an app can only hide, the published rulings are a list of places
+  where removed material may still be found. Rulings carry no public reason,
+  which helps, but such apps should move toward formats that accept
+  tombstones, such as blob contracts with a tombstone slot.
 - Computing reputation from every honoured issuer's full ruling history gets
-  expensive as histories grow. Issuers should probably publish compact,
-  signed reputation summaries for UIs to read instead.
+  expensive as histories grow. Issuers should publish compact, signed
+  reputation summaries for UIs to read instead.
 
 ## Sharing removal decisions across apps (draft, possibly not v1)
 
@@ -325,6 +400,12 @@ multiplication, so a million checks costs about a minute of CPU.
   acceptable?
 - How are issuers discovered, and how does an app express "honour these
   issuers" in a way users can inspect?
+- How is a moderation key revoked? A contract cannot read the clock, so if it
+  stopped accepting a key's tombstones once the key was revoked, peers that
+  saw a tombstone before the revocation would keep it and peers that saw it
+  after would not, and they would never agree. One option is that a tombstone
+  carries the authorisation it was signed under and stays valid for good,
+  while clients refuse to deliver new tombstones from revoked keys.
 - How do reports work in encrypted spaces, where only members can see the item?
 - Should v1 include cross-app sharing of removal decisions?
 - Which second consumer (Atlas reviews, seller ratings, spam lists) should the
