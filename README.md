@@ -25,8 +25,8 @@ Most Freenet apps are built by individuals or small teams, often pseudonymous,
 who cannot build moderation infrastructure from scratch. This project aims to
 give them a small kit that meets the requirement: a report button, a checking
 service that confirms or rejects a report within seconds, optional scanning of
-new uploads, and a feed the app subscribes to so that confirmed items
-disappear from its UI in real time.
+new uploads, and removal of confirmed material from the network, not just
+from the app's screen.
 
 ## Scope decisions so far
 
@@ -37,22 +37,25 @@ disappear from its UI in real time.
   costs the service a check per upload, so a scan request must be signed by a
   [ghost key](https://freenet.org/ghostkey/), and the service limits scans
   per key.
-- **Items are checked automatically, and nobody looks at the material.** The checking service matches reported files against vetted
-  lists of known material and runs a purpose-built image classifier. No
-  person and no general-purpose AI model views the material: we will not ask
-  anyone to do that. Because a report carries no identifying information
-  about any person (see "Reporting to NCMEC"), a wrong verdict cannot lead to
-  anyone being investigated. The worst case is a legitimate item hidden by
-  mistake, which can be undone.
+- **The service acts automatically, and only on known material.** It matches
+  files against vetted lists of material already identified by organisations
+  such as NCMEC and IWF. No person and no AI model views the material: we
+  will not ask anyone to do that. Classifiers that judge material nobody has
+  seen before are left out, because their vendors require human review before
+  acting on a result (see "Explored and deferred"). New material is handled
+  by sending reporters to NCMEC, whose trained analysts review it, and by
+  re-checking reported items as the lists grow.
+- **Confirmed material is removed at the source.** The service sends a signed
+  tombstone to the contract that holds the item, so every peer drops the bytes
+  within seconds. Nothing public names where confirmed material is.
 - **The checking service has an accountable operator.** Running it carries
   legal duties: in the US, reporting apparent child sexual abuse material to
   NCMEC and preserving it for a year. Freenet Project Inc. would operate the
   service and register with NCMEC's CyberTipline. Both duties are automated.
-- **Moderation stays in the app layer.** Nothing here requires changes to
-  freenet-core. Each app decides whether to honour the checking service's
-  verdicts, its own moderator's decisions, or both. An app that ignores or
-  buries reports is handled the way it is today: users report the app itself
-  to Atlas and the Official room, and those can delist it.
+- **Apps opt in, and nothing here changes freenet-core.** An app opts in by
+  having its content contracts accept the service's tombstones. An app that
+  ignores or buries reports is handled the way it is today: users report the
+  app itself to Atlas and the Official room, and those can delist it.
 - **A general system, minimal at first.** The shape of a verdict (an issuer
   signs a claim about a subject) is general, so this is designed as a general
   claims system with moderation as its first application. Trust scoring and
@@ -63,7 +66,8 @@ disappear from its UI in real time.
 1. **Any user can report an item.** The report goes to the checking service,
    or to the app's own moderator if the app prefers one, for example a River
    room's owner. For suspected child sexual abuse material, the report UI also
-   links to [NCMEC's CyberTipline](https://report.cybertip.org).
+   links to [NCMEC's CyberTipline](https://report.cybertip.org), so material
+   that is not yet on any list reaches people trained to review it.
 2. **Reports are gated against abuse** with a
    [ghost key](https://freenet.org/ghostkey/) signature, or proof-of-work for
    users without one, since reporting illegal material should never cost
@@ -81,40 +85,39 @@ disappear from its UI in real time.
    the bytes, recomputes the hash and judges what is actually there. An app's
    UI computes whatever hash it sends, so this is what stops an app, or anyone
    else, from getting the wrong content flagged by misdirecting reports.
-6. **A confirmed item disappears in real time.** The service publishes its
-   verdict to the app's verdict feed, the app's UI hides the item within
-   seconds, and the app then removes it with its own mechanism, such as a
-   tombstone in the contract.
+6. **Confirmed material vanishes.** The service sends a tombstone to the
+   contract named in the locator, and the item's bytes drop out of that
+   contract on every peer that holds it.
 
 ## The checking service (draft)
 
 ### What it checks and what happens
 
-| Result | Hidden | Reported to NCMEC |
+| Result | Removed | Reported to NCMEC |
 |---|---|---|
-| Matches a list of known material | At once | Automatically |
-| Flagged by the classifier only | At once | Only above a strict threshold or with corroboration (below) |
-| Neither | No | No |
+| Matches a list of known material | At once, by tombstone | Automatically |
+| No match | No | No; the reporter is pointed to the CyberTipline |
 
-Known-material lists and classifiers (for example PhotoDNA with NCMEC and IWF
-hash lists, Thorn's Safer, Google's Content Safety API) are available only to
-vetted organisations, so Freenet Project Inc. would apply for access.
-Perceptual matching (PhotoDNA, PDQ) runs inside the service and is never
-published (see "Explored and deferred").
+Known-material lists and matching tools (for example PhotoDNA with NCMEC and
+IWF hash lists) are available only to vetted organisations, so Freenet Project
+Inc. would apply for access. Perceptual matching (PhotoDNA, PDQ) runs inside
+the service and is never published (see "Explored and deferred").
 
-Hiding is cheap to get wrong and easy to undo, so the threshold for hiding
-is low. Filing is neither, so the bar for filing is high. Known-material
-matches have a near-zero false-positive rate and are filed automatically. A
-classifier-only hit is filed only when the score clears a strict threshold or
-something corroborates it, such as several independent reports. Filing every
-classifier hit would bury NCMEC in reports it cannot use and teach it to
-discount ours. Providers are protected from liability for their reports (18
-U.S.C. §2258B) unless they act with intentional misconduct, actual malice, or
-reckless disregard of a risk of physical injury, so the concern with false
-positives is usefulness rather than liability. Whether the checking service
-counts as a provider at all, whether a classifier score alone counts as the
-"actual knowledge" that triggers the duty to report, and where the threshold
-sits, are for counsel to settle before launch.
+An unmatched report is not forgotten. The service keeps the item's locator and
+perceptual hashes, never its bytes, and re-checks them as the lists grow. When
+NCMEC's analysts confirm a file someone reported to them directly, it joins the
+lists, and the next re-check removes it here. That path takes days rather than
+seconds, but it handles new material without anyone at Freenet viewing it.
+
+Perceptual hashes can be deliberately collided, so a harmless image crafted to
+match a listed one could be removed and reported under its publisher's key.
+To guard against this, a match counts only when two independent algorithms
+agree (for example PhotoDNA and PDQ), or when the file matches exactly.
+
+Providers are protected from liability for their reports (18 U.S.C. §2258B)
+unless they act with intentional misconduct, actual malice, or reckless
+disregard of a risk of physical injury. Whether the checking service counts as
+a provider at all is for counsel to settle before launch.
 
 A scanned upload gets the same check and the same outcomes as a reported one.
 
@@ -129,14 +132,37 @@ caps contracts need.
 
 The submitter is whoever moderates the space, not the uploader: a bad
 uploader would simply skip a scan of their own upload. For River, the room
-owner's node (for example a moderation delegate, using scheduled wake-ups)
-submits new media in the room. Scan volume then follows uploads, and the
-limit attaches to the moderator's key.
+owner's node submits new media in the room. Scan volume then follows uploads,
+and the limit attaches to the moderator's key.
 
 In a private, encrypted space, scanning means sending decrypted bytes to the
 service. That is the owner's choice to make, and members should be told it is
 on. An owner who does not want that can still use exact-hash checks (see
 "Sharing removal decisions across apps"), which reveal nothing to the service.
+
+### Removal
+
+An app opts in by writing its content contracts to accept a tombstone signed
+by the checking service. The contract carries the service's root public key,
+and each tombstone carries a certificate from that root for the subkey that
+signed it, so the service can rotate signing keys without any app changing its
+contract. A shared crate will provide the tombstone type, its verification and
+its merge rule, so apps do not hand-roll them.
+
+A tombstone keeps the item's id and content hash and drops its bytes. It wins
+every merge, so a peer holding older state cannot bring the item back, and it
+must never be evicted by a cap on the contract's size. Because it is an
+ordinary contract update, every subscribed peer applies it within seconds,
+including the checking service's own node, which fetched the item to check it.
+
+Two limits remain. A peer that holds an old copy and never syncs again keeps
+the bytes. And between fetching an item and tombstoning it, the service's
+node holds the item for a few seconds. Users should be told the item was
+removed, not that it was erased from every disk.
+
+The service does not tombstone apps that have not opted in, and publishes
+nothing about them, since any public verdict would point at material it cannot
+remove.
 
 ### Reporting to NCMEC
 
@@ -155,29 +181,15 @@ collect, or anything about the reporter. The publisher key is a persistent
 pseudonym, so it links every report against the same uploader.
 
 Most such reports will not lead to an investigation, because there is no
-person to pass them to. They are still useful: NCMEC adds the file to the hash
-lists it shares with other platforms, and its victim-identification work runs
-on image content rather than on who uploaded it. We should explain the shape of
-these reports to NCMEC when registering.
+person to pass them to. We should explain the shape of these reports to NCMEC
+when registering.
 
 Reported material is preserved encrypted for the required year and then
-deleted, automatically.
-
-### The verdict feed
-
-Each app has a verdict contract, keyed by the service's public key and the
-app's id, that only the service can write to. Each entry names the item's
-locator and content hash and is signed by the service. The app's UI
-subscribes and hides matching items as entries arrive, so the real-time
-notification is an ordinary contract update.
-
-The feed tells anyone running the app which items were flagged, and the bytes
-remain fetchable until the app removes them. So apps should tombstone promptly,
-and entries for items already tombstoned can be pruned.
+deleted, automatically, unless a legal hold applies.
 
 ### Speed
 
-Pushing a verdict to subscribers is fast. The slow step is the service
+Sending a tombstone to subscribers is fast. The slow step is the service
 fetching the reported bytes, since a network GET can currently take far longer
 than a few seconds. Reporters must not attach the bytes themselves: that would
 have users sending the material to a private party, which the law permits
@@ -201,9 +213,8 @@ can block re-uploads of the same file.
   listed, the service learns neither the item nor the result, and nobody can
   enumerate the list.
 - **Checks happen where the moderator is, not where every reader is.** For
-  River, the room owner's node (for example a moderation delegate, using
-  scheduled wake-ups) checks new and recent media in the room. Check volume
-  then follows uploads, not views, and the rate limit attaches to the
+  River, the room owner's node checks new and recent media in the room. Check
+  volume then follows uploads, not views, and the rate limit attaches to the
   moderator's key.
 - **Rate limits attach to whoever makes the check, not to the app's creator.**
   An app creator's key cannot be shipped in the app, and a remote service
@@ -215,10 +226,11 @@ can block re-uploads of the same file.
 
 ## Cost
 
-Checking an image is cheap: a hash lookup and one classifier run. Report
-volume is bounded by the ghost-key or proof-of-work gate. Scan volume follows
-uploads and is the larger cost, which is why each scan needs a ghost key and
-each key has a limit. Fees for vetted detection services are not yet known. Cross-app checks
+Checking an image is cheap: a hash computation and a lookup. Fetching the
+item, especially video, costs more than the check. Report volume is bounded
+by the ghost-key or proof-of-work gate. Scan volume follows uploads and is the
+larger cost, which is why each scan needs a ghost key and each key has a
+limit. Fees for vetted detection services are not yet known. Cross-app checks
 are cheap too: an oblivious PRF evaluation is about one elliptic-curve
 multiplication, so a million checks costs about a minute of CPU. The main
 cost there is the network traffic of carrying checks through contracts, which
@@ -226,17 +238,42 @@ is why they are batched and made per upload rather than per view.
 
 ## Explored and deferred
 
-- **Perceptual hashes** (PDQ for images, TMK+PDQF or vPDQ for video) catch
-  modified re-uploads. They cannot use an oblivious exact-match check, they
-  can leak image content (PhotoDNA has been shown to be invertible to
-  thumbnails), and they can be deliberately collided. So a perceptual list must
-  never be published, and matching happens only inside the checking service.
+- **Classifiers for new material** (Google's Content Safety API, Thorn's
+  Safer): the terms we found require the partner to review content before
+  acting on a result, or bar sharing results, and we will not ask people to
+  review this material. An AI model as the reviewer was considered. A hosted
+  model would mean sending the material to a third party, and a self-hosted
+  one is in effect another classifier, which is unlikely to satisfy a review
+  requirement. Worth asking the vendors before ruling it out.
+- **A verdict list read through related contracts**, with content contracts
+  dropping items listed in it: freenet-core resolves related contracts only
+  when a contract is validated, and never re-validates when the related
+  contract changes. A peer that merged an item before the verdict would keep it
+  and keep sending it, so peers would never converge. The list would also be a
+  public directory of hashes of confirmed material. A tombstone sent to the
+  content contract has neither problem.
+- **Perceptual hashes as a published list** (PDQ for images, TMK+PDQF or vPDQ
+  for video): they cannot use an oblivious exact-match check, they can leak
+  image content (PhotoDNA has been shown to be invertible to thumbnails), and
+  they can be deliberately collided. So a perceptual list must never be
+  published, and matching happens only inside the checking service.
 
 ## Open questions
 
-- With nobody reviewing, how does someone appeal a wrongly hidden item?
-- What threshold or corroboration should a classifier-only hit need before it
-  is filed with NCMEC? (A question for counsel.)
+- What do PhotoDNA's terms allow? They bar using the cloud service to provide
+  a managed service, which checking for many apps may be. We need the
+  vendors' answers in writing.
+- Does the checking service count as a provider under the law, and what
+  follows if it does not? (A question for counsel.)
+- Report-triggered checks cost the same as scans, so proof-of-work reports are
+  a free scan and let an offender test altered files until one passes. How
+  small should the proof-of-work allowance be, relative to ghost-key reports?
+- With nobody reviewing, how does someone appeal a wrongly removed item?
+- How do reports work in encrypted spaces, where the service cannot read the
+  item?
+- How is the service's root key protected against theft or compelled misuse,
+  and what transparency log of removals (hashes and reasons only) should it
+  publish?
 - How many scans should a ghost key get, and how should donation amount and
   key age weight that?
 - Should v1 include cross-app sharing of removal decisions, or start with
@@ -247,8 +284,6 @@ is why they are batched and made per upload rather than per view.
 - What should an app do when the checking service is unavailable?
 - How are issuers discovered, and how does an app express "honour these
   issuers" in a way users can inspect?
-- How should revocation work, and what transparency (counts by claim type, for
-  example) should an issuer publish?
 - Which second consumer (Atlas reviews, seller ratings, spam lists) should the
   general claim format be designed against?
 
