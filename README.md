@@ -215,8 +215,15 @@ Most such reports will not lead to an investigation, because there is no
 person to pass them to. We should explain the shape of these reports to NCMEC
 when registering.
 
-Reported material is preserved encrypted for the required year and then
-deleted, automatically, unless a legal hold applies.
+Reported material is preserved for the required year and then deleted,
+automatically, unless a legal hold applies. It is preserved so that Freenet
+Project Inc. cannot read it. Each file is encrypted with its own symmetric
+key, and that key is encrypted to a public key whose private key Freenet
+Project Inc. never holds, ideally held by NCMEC or law enforcement, who are
+the only parties entitled to the material. A breach, or anyone at Freenet
+Project Inc., gets nothing usable. The service computes hashes in memory,
+never writes an unmatched file to disk, and encrypts a matched file as soon
+as it matches.
 
 ### Speed
 
@@ -293,6 +300,10 @@ is why they are batched and made per upload rather than per view.
 - What do the terms of NCMEC's hash-sharing program allow? In particular,
   may a registered provider match on behalf of many independent apps? We need
   NCMEC's answer in writing.
+- Will NCMEC, or a law-enforcement body, hold the private key for preserved
+  material? And does keeping only ciphertext that Freenet Project Inc. cannot
+  decrypt meet the preservation duty, and avoid possession? (Questions for
+  NCMEC and counsel.)
 - How close must a PDQ match be before the service acts, given that a
   tighter threshold misses more altered copies?
 - Does the checking service count as a provider under the law, and what
