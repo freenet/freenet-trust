@@ -5,8 +5,8 @@ says something about a subject (a piece of content, a key, a contract), and any
 Freenet app can choose which issuers it honours.
 
 The first use is helping app developers deal with illegal content, through
-**user reporting**. Later uses could include spam and scam lists, seller
-ratings and reviews.
+**user reporting checked automatically within seconds**. Later uses could
+include spam and scam lists, seller ratings and reviews.
 
 **Status: design discussion. There is no code yet.** This repository is a place
 to work out the design together before implementation starts. Please use
@@ -23,68 +23,151 @@ and video are where this matters most.
 
 Most Freenet apps are built by individuals or small teams, often pseudonymous,
 who cannot build moderation infrastructure from scratch. This project aims to
-give them a small kit that meets the requirement: a report button, a moderator
-queue, and optionally a way to share removal decisions with other apps.
+give them a small kit that meets the requirement: a report button, a checking
+service that confirms or rejects a report within seconds, and a feed the app
+subscribes to so that confirmed items disappear from its UI in real time.
 
 ## Scope decisions so far
 
-- **Reporting first, not proactive AI scanning.** Scanning content creates
-  legal obligations for whoever runs it (in the US, reporting to NCMEC and
-  preserving reported material for a year), needs human review of the worst
-  material, and costs money at scale. A reporting system avoids nearly all of
-  that and fits how Freenet apps already work. The trade-off is that it is
-  reactive: material stays up until someone reports it and a moderator acts.
-  Proactive detection may come later as an opt-in service, but it is out of
-  scope for v1.
+- **Reports, not proactive scanning.** Only items a user has reported are
+  checked. Scanning everything published would cost far more and is deferred
+  (see below).
+- **Reports are checked automatically, and nobody looks at reported
+  material.** The checking service matches reported files against vetted
+  lists of known material and runs a purpose-built image classifier. No
+  person and no general-purpose AI model views the material: we will not ask
+  anyone to do that. Because a report carries no identifying information
+  about any person (see "Reporting to NCMEC"), a wrong verdict cannot lead to
+  anyone being investigated. The worst case is a legitimate item hidden by
+  mistake, which can be undone.
+- **The checking service has an accountable operator.** Running it carries
+  legal duties: in the US, reporting apparent child sexual abuse material to
+  NCMEC and preserving it for a year. Freenet Project Inc. would operate the
+  service and register with NCMEC's CyberTipline. Both duties are automated.
 - **Moderation stays in the app layer.** Nothing here requires changes to
-  freenet-core. An app that ignores or buries reports is handled the way it is
-  today: users report the app itself to Atlas and the Official room, and those
-  can delist it.
-- **A general system, minimal at first.** The shape of a report outcome (an
-  issuer signs a claim about a subject) is general, so this is designed as a
-  general claims system with moderation as its first application. Trust
-  scoring and aggregation are left until a concrete consumer needs them.
+  freenet-core. Each app decides whether to honour the checking service's
+  verdicts, its own moderator's decisions, or both. An app that ignores or
+  buries reports is handled the way it is today: users report the app itself
+  to Atlas and the Official room, and those can delist it.
+- **A general system, minimal at first.** The shape of a verdict (an issuer
+  signs a claim about a subject) is general, so this is designed as a general
+  claims system with moderation as its first application. Trust scoring and
+  aggregation are left until a concrete consumer needs them.
 
 ## How reporting works (draft)
 
-1. **Any user can report an item.** The report goes to the moderator of that
-   app or space, for example a River room's owner. For suspected child sexual
-   abuse material, the report UI also links to
-   [NCMEC's CyberTipline](https://report.cybertip.org), so the material never
-   has to pass through anyone else.
+1. **Any user can report an item.** The report goes to the checking service,
+   or to the app's own moderator if the app prefers one, for example a River
+   room's owner. For suspected child sexual abuse material, the report UI also
+   links to [NCMEC's CyberTipline](https://report.cybertip.org).
 2. **Reports are gated against abuse** with a
    [ghost key](https://freenet.org/ghostkey/) signature, or proof-of-work for
    users without one, since reporting illegal material should never cost
    money. Contracts cannot read the clock, so rate limits are clock-free, for
    example a cap on open reports per key.
-3. **A report never removes anything by itself.** A moderator decides. That
-   turns a flood of false reports into a nuisance in the queue rather than a
-   way to take content down.
-4. **Reports are encrypted to the moderator.** Contract state on Freenet is
+3. **A report never removes anything by itself.** The check decides. A flood
+   of false reports produces a flood of rejections, not takedowns.
+4. **Reports are encrypted to the recipient.** Contract state on Freenet is
    public, so a plain-text report inbox would be a list of reported (possibly
    illegal) items and of who reported them. The reporter signs the ciphertext,
    so the inbox contract can still check the signature without reading the
    report.
 5. **A report is a pointer, not a trusted hash.** It carries a locator
-   (contract key plus path or item id) and a content hash. The moderator
-   fetches the bytes, recomputes the hash and judges what they actually see.
-   An app's UI computes whatever hash it sends, so this is what stops an app,
-   or anyone else, from getting the wrong content flagged by misdirecting
-   reports.
-6. **The moderator removes the item** using the app's own mechanism, such as a
-   tombstone in the contract or a denylist the UI filters against.
+   (contract key plus path or item id) and a content hash. The checker fetches
+   the bytes, recomputes the hash and judges what is actually there. An app's
+   UI computes whatever hash it sends, so this is what stops an app, or anyone
+   else, from getting the wrong content flagged by misdirecting reports.
+6. **A confirmed item disappears in real time.** The service publishes its
+   verdict to the app's verdict feed, the app's UI hides the item within
+   seconds, and the app then removes it with its own mechanism, such as a
+   tombstone in the contract.
+
+## The checking service (draft)
+
+### What it checks and what happens
+
+| Result | Hidden | Reported to NCMEC |
+|---|---|---|
+| Matches a list of known material | At once | Automatically |
+| Flagged by the classifier only | At once | Only above a strict threshold or with corroboration (below) |
+| Neither | No | No |
+
+Known-material lists and classifiers (for example PhotoDNA with NCMEC and IWF
+hash lists, Thorn's Safer, Google's Content Safety API) are available only to
+vetted organisations, so Freenet Project Inc. would apply for access.
+Perceptual matching (PhotoDNA, PDQ) runs inside the service and is never
+published (see "Explored and deferred").
+
+Hiding is cheap to get wrong and easy to undo, so the threshold for hiding
+is low. Filing is neither, so the bar for filing is high. Known-material
+matches have a near-zero false-positive rate and are filed automatically. A
+classifier-only hit is filed only when the score clears a strict threshold or
+something corroborates it, such as several independent reports. Filing every
+classifier hit would bury NCMEC in reports it cannot use and teach it to
+discount ours. Providers that report in good faith are protected from
+liability (18 U.S.C. §2258B), but that protection does not cover reckless
+disregard, and knowingly filing a high volume of false positives could come
+close to it. Whether a classifier score alone counts as the "actual
+knowledge" that triggers the duty to report, and where the threshold sits,
+are for counsel to settle before launch. Either way, the item is hidden.
+
+### Reporting to NCMEC
+
+Reports go through the CyberTipline's API for registered providers, with no
+manual step. The law requires reporting an apparent violation; the
+identifying details it lists, such as IP addresses, are optional. A report
+from this service would carry:
+
+- the file and its hash
+- the contract key and item id
+- the publisher's public key, if the content is signed
+- when the service saw it
+
+It would not carry IP addresses, which the service does not have and must not
+collect, or anything about the reporter. The publisher key is a persistent
+pseudonym, so it links every report against the same uploader.
+
+Most such reports will not lead to an investigation, because there is no
+person to pass them to. They are still useful: NCMEC adds the file to the hash
+lists it shares with other platforms, and its victim-identification work runs
+on image content rather than on who uploaded it. We should explain the shape of
+these reports to NCMEC when registering.
+
+Reported material is preserved encrypted for the required year and then
+deleted, automatically.
+
+### The verdict feed
+
+Each app has a verdict contract, keyed by the service's public key and the
+app's id, that only the service can write to. Each entry names the item's
+locator and content hash and is signed by the service. The app's UI
+subscribes and hides matching items as entries arrive, so the real-time
+notification is an ordinary contract update.
+
+The feed tells anyone running the app which items were flagged, and the bytes
+remain fetchable until the app removes them. So apps should tombstone promptly,
+and entries for items already tombstoned can be pruned.
+
+### Speed
+
+Pushing a verdict to subscribers is fast. The slow step is the service
+fetching the reported bytes, since a network GET can currently take far longer
+than a few seconds. If that proves too slow, the reporter's client could attach
+the bytes, encrypted to the service. That works only if the app identifies
+items by a content hash recorded in its contract, so the service can confirm
+the bytes are the item at that locator with a small read instead of a large
+fetch.
 
 ## Sharing removal decisions across apps (draft, possibly not v1)
 
-When a moderator removes something as illegal, they can publish that decision
-as a claim, so other apps that honour that moderator (or a curated issuer) can
-block re-uploads of the same file. This spreads human decisions, not automated
-ones.
+When the checking service or a moderator removes something as illegal, the
+decision can be published as a claim, so other apps that honour that issuer
+can block re-uploads of the same file.
 
 - **Content is identified by a hash of its bytes**, not by where it is stored.
   That works however an app stores media, matches the same file across apps,
   and survives contract re-keys.
-- **Claims are only made about bytes a moderator has checked**, as above.
+- **Claims are only made about bytes the issuer has checked**, as above.
 - **The list must never become a directory of illegal material.** Hashing the
   subject is not enough: Freenet content can be crawled, so anyone could hash
   what they find and test it against a public list. Checks therefore need to be
@@ -107,37 +190,42 @@ ones.
 
 ## Cost
 
-Checking is cheap: an oblivious PRF evaluation is about one elliptic-curve
+Checking a reported image is cheap: a hash lookup and one classifier run.
+Volume follows reports, not uploads, so the service's running cost is small
+unless reporting is abused, and the ghost-key or proof-of-work gate bounds
+that. Fees for vetted detection services are not yet known. Cross-app checks
+are cheap too: an oblivious PRF evaluation is about one elliptic-curve
 multiplication, so a million checks costs about a minute of CPU. The main
-running cost is the network traffic of carrying checks through contracts,
-which is why checks are batched and made per upload rather than per view.
-Reporting itself costs almost nothing.
+cost there is the network traffic of carrying checks through contracts, which
+is why they are batched and made per upload rather than per view.
 
 ## Explored and deferred
 
-- **Proactive AI detection** (hash matching against vetted lists of known
-  material, open-weight classifiers): technically feasible and cheap in
-  compute for images, but it brings the legal and human-review burden described
-  above. Revisit as an opt-in service with an accountable operator.
-- **Perceptual hashes** (PDQ for images, TMK+PDQF or vPDQ for video) would
-  catch modified re-uploads. They cannot use an oblivious exact-match check,
-  they can leak image content (PhotoDNA has been shown to be invertible to
+- **Proactive scanning** of everything published, not only reported items:
+  technically feasible, but it costs far more and would multiply NCMEC
+  filings, most of them not actionable. Revisit once reporting has run for a
+  while.
+- **Perceptual hashes** (PDQ for images, TMK+PDQF or vPDQ for video) catch
+  modified re-uploads. They cannot use an oblivious exact-match check, they
+  can leak image content (PhotoDNA has been shown to be invertible to
   thumbnails), and they can be deliberately collided. So a perceptual list must
-  never be published, matching would need a trusted service, and a match could
-  only ever trigger human review.
+  never be published, and matching happens only inside the checking service.
 
 ## Open questions
 
+- With nobody reviewing, how does someone appeal a wrongly hidden item?
+- What threshold or corroboration should a classifier-only hit need before it
+  is filed with NCMEC? (A question for counsel.)
 - Should v1 include cross-app sharing of removal decisions, or start with
   per-app reporting only?
 - A reporter's ghost-key fingerprint is visible on the report ciphertext and is
   the same across apps, so reporting activity is linkable. Is that acceptable,
   or do we need single-use report tokens that hide who reported?
-- What should an app do when the check service is unavailable?
+- What should an app do when the checking service is unavailable?
 - How are issuers discovered, and how does an app express "honour these
   issuers" in a way users can inspect?
-- How should revocation and appeals work, and what transparency (counts by
-  claim type, for example) should an issuer publish?
+- How should revocation work, and what transparency (counts by claim type, for
+  example) should an issuer publish?
 - Which second consumer (Atlas reviews, seller ratings, spam lists) should the
   general claim format be designed against?
 
