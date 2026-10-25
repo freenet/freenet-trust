@@ -28,17 +28,55 @@ reported material quickly, a reputation system that makes false reporting
 self-defeating, and a way for the app's moderator to remove confirmed
 material from the network, mostly without anyone having to look at it.
 
+## The principle
+
+**Hiding is fast and reversible. Influence is scarce and accountable.**
+
+The two possible mistakes have very different costs. Hiding a legitimate item
+by mistake is recoverable: the item comes back when a moderator restores it.
+Leaving illegal material visible is not recoverable. So the system hides
+quickly on reports, and accepts that a false report will sometimes hide a
+legitimate item for a while. It does not try to stop malicious reports from
+being made. It makes being wrong cost the reporter something they cannot
+cheaply replace.
+
+Four rules carry this:
+
+1. **Weight comes from a scarce identity.** A report counts in proportion to
+   the [ghost key](https://freenet.org/ghostkey/) that signed it. Ghost keys
+   cost money that better hardware cannot reduce, so the many keys a false
+   vote needs are expensive. A slow proof-of-work report is the free
+   fallback, at a low fixed weight.
+2. **Standing is earned slowly and lost quickly.** A key gains weight only
+   when rulings confirm its reports, and it loses weight faster than it gains
+   it. A key that took months to build is spent by one false report.
+3. **The person a false report harms is the one who challenges it.** The
+   uploader of a wrongly reported item has every reason to dispute, at little
+   cost. Someone who uploaded illegal material has little reason to, since a
+   dispute costs a key and puts the item in front of a moderator. An
+   undisputed report is confirmed after a waiting period, and a disputed one
+   goes to a person. People therefore look only at disputed items, and those
+   are mostly legitimate.
+4. **Judgment stays in the space, and trust is chosen by the viewer.** Each
+   space's own moderator makes the rulings for that space. Each app and each
+   user chooses whose rulings count toward reputation. A malicious moderator
+   affects only the people who chose to honour them. Nobody judges centrally.
+
+This gives up some things, and they are stated in "Threat model" below: a
+griefer can hide a legitimate item until a moderator restores it, a space with
+no moderator can neither restore nor remove anything, no one can overrule a
+space's moderator inside that space, and the ghost-key mint is the one central
+element.
+
 ## Scope decisions so far
 
+- **No central service.** Everything runs in contracts, delegates and app
+  UIs. No service operated by Freenet Project Inc. or anyone else fetches,
+  examines or judges reported material, and no part of the system depends on
+  one being online.
 - **Reports hide; nothing automatic judges the content.** Enough weighted
-  reports hide an item in the app's UI. No service fetches or examines
-  reported material. An automatic checker was designed and set aside for now
-  (see "Automatic checking (later)").
-- **Ghost keys give reports their weight.** A report is signed by a
-  [ghost key](https://freenet.org/ghostkey/). Ghost keys cost money that
-  better hardware cannot reduce, so an attacker cannot cheaply mint the many
-  keys a vote needs. Users without one can make a slower, low-weight report
-  with proof-of-work, so that reporting illegal material never costs money.
+  reports hide an item in the app's UI. Removal follows a moderator's ruling,
+  or the absence of a dispute.
 - **Disputes never unhide anything.** If disputes could bring an item back,
   the people most motivated to dispute illegal material would be the people
   who want it up.
@@ -62,8 +100,7 @@ material from the network, mostly without anyone having to look at it.
 1. **Any user can report an item.** The report names the item and is signed
    by the reporter's ghost key. The report screen also links to
    [NCMEC's CyberTipline](https://report.cybertip.org), so that suspected
-   child sexual abuse material reaches people trained to review it and, once
-   confirmed, the hash lists other platforms use.
+   child sexual abuse material reaches people trained to review it.
 2. **Users without a ghost key can report with proof-of-work.** The puzzle
    takes about a minute on typical hardware. While it runs, the UI shows "Skip
    the wait with a ghost key". The wait also gives a would-be false reporter
@@ -91,11 +128,12 @@ material from the network, mostly without anyone having to look at it.
 ### Hiding
 
 An item is hidden in the app's UI once the weighted reports against it pass the
-app's threshold. A report's weight is the reporter key's base weight (from its
-donation amount and age) multiplied by its reputation. New keys start with low
-weight. A key with a long record of reports confirmed by rulings can carry
-enough weight to hide an item on its own, so the best reporters become the
-fastest.
+space's threshold. A report's weight is the reporter key's base weight
+multiplied by its reputation. Base weight grows with the key's donation amount,
+sublinearly and with a cap, and with the time since the key's first report in
+the space, also capped. New keys start with low weight. A key with a long
+record of reports confirmed by rulings can carry enough weight to hide an item
+on its own, so the best reporters become the fastest.
 
 Hiding is computed in the UI, or by a delegate, from the reports and the
 rulings. It is not decided by the contract, so it never affects the contract's
@@ -122,22 +160,23 @@ sides.
 | Remove | Removed (see "Removal") | Gain reputation | Lose reputation |
 | Undisputed for N days | Removed automatically | Gain reputation | (none) |
 
+Losses are larger than gains, so that standing is slow to build and quick to
+lose.
+
 The last row is what keeps moderators from having to look at reported
 material. On a scheduled wake-up, the moderator's delegate (or, for an app run
 from a server, the same code in the moderator's daemon) rules "remove" on
-hidden items that nobody disputed within the waiting period. Each space sets
+hidden items that nobody disputed within the waiting period. Delegates can
+read the clock, so this works without anyone viewing the item. Each space sets
 its own waiting period, and it can be zero: in an app whose items are pointers
 to content elsewhere, such as Atlas's listings, an item that is hidden but not
 yet removed tells anyone reading where reported material is, so such apps
-should remove at once. Delegates can read the clock, so this works without anyone viewing the
-item. Only disputed items need a human decision, and since disputes come
-mostly from wrongly reported uploaders, what moderators end up looking at is
-mostly legitimate content. Someone who uploaded illegal material has little
-reason to dispute: it costs a ghost key, and losing burns that key's
-reputation.
+should remove at once.
 
-A moderator who confirms illegal material on a dispute removes it and reports
-it to the CyberTipline.
+Only disputed items need a human decision, and since disputes come mostly from
+wrongly reported uploaders, what moderators end up looking at is mostly
+legitimate content. A moderator who confirms illegal material on a dispute
+removes it and can report it to the CyberTipline.
 
 Rulings are signed claims, published by the moderator in a rulings contract.
 Each ruling references the reports it decides, so that reputation can be
@@ -151,33 +190,36 @@ decided; what it does to the item is up to the app (see "Removal").
 A key's reputation rises with rulings in its favour and falls with rulings
 against it. A key whose reputation reaches zero is ignored.
 
-Reputation carries across apps, so that rulings in one app count in every app.
-Without that, reputation would mean little in apps whose moderators rarely
-rule. But a malicious moderator could then ruin honest reporters everywhere.
-So each app, and each user, chooses whose rulings count toward reputation:
-"honour these issuers", the general mechanism this project exists to provide.
-Reputation is computed from the rulings of honoured issuers only, by the UI or
-a delegate.
+Whose rulings count is chosen, never fixed: "honour these issuers", the
+general mechanism this project exists to provide. Reputation is computed from
+the rulings of honoured issuers only, by the UI or a delegate.
 
-### How each attack plays out
+- **By default a space honours only its own moderators.** A key's standing in
+  a space then comes only from rulings made in that space. No issuer is
+  honoured by default anywhere, including any run by Freenet Project Inc.
+- **Apps may ship suggested lists**, such as the moderators of other spaces
+  the app trusts. A suggested list must be visible to the user, show who is on
+  it, and be changeable. This lets reputation carry across spaces and apps,
+  which matters for apps whose moderators rarely rule. It also gives whoever
+  writes the list influence, which is why it must stay visible and optional.
+- **Each user can override their app's choice**, adding or removing issuers.
 
-- **Mass false reports (griefing).** Hiding one legitimate item costs enough
-  keys to pass the threshold. Each restore burns those keys' reputation, so the
-  griefer must keep buying fresh keys, which start with low weight, and the
-  hide lasts only until a moderator restores it.
-- **Disputing illegal material to keep it up.** Disputes do not unhide, so this
-  protects nothing. When the moderator removes the item, the disputing keys
-  lose reputation.
-- **Ruining honest reporters.** This needs rulings to go against them, and only
-  moderators make rulings, so cheap keys cannot do it.
-- **Disputing just to force a moderator to view illegal material.** Costly,
-  capped per key, and it burns the disputing key's reputation when the
-  moderator removes the item.
-- **Farming reputation to spend later.** Earning it means making reports that
-  rulings confirm, which removes real bad content.
-- **Apps without an active moderator.** Nothing gets ruled on, so a griefer's
-  hide is permanent and nothing gets removed. This is the main weakness; it is
-  why apps that show user content need a moderator anyway.
+### Threat model
+
+| Attacker | What they try | Mitigation | Trade-off accepted |
+|---|---|---|---|
+| Griefer | Hide legitimate items with false reports | New keys have low weight, so hiding needs several; each restore burns those keys' reputation, so the griefer keeps buying fresh low-weight keys | Honest first reports from new keys hide slowly. A false hide lasts until a moderator restores it |
+| Rich attacker | Buy enough weight to hide at will | Donation counts sublinearly and is capped, so money buys keys, not weight; weight beyond the cap comes only from confirmed reports | Large honest donors carry no more weight than modest ones |
+| Stockpiled keys | Mint keys early and let them age, to spend later | Age counts from a key's first report in the space, not from minting, and is capped | Honest reporters new to a space start weak there, however old their key |
+| Disputer | Dispute illegal material to keep it up | Disputes never unhide; disputing keys lose reputation when the item is removed | A wrongly hidden item stays hidden until a moderator looks |
+| Own-space reputation farm | Create a space, report and rule in your own favour, then spend that reputation elsewhere | By default a space honours only its own moderators, so rulings in the farm count only in the farm. They count elsewhere only where someone chose to honour the farm's moderator | By default reputation does not carry between spaces; carrying it needs someone to curate an honour list |
+| Malicious or captured moderator | Remove legitimate items, restore illegal ones, or ruin honest reporters | Rulings are public and reference the reports they decide, so anyone can audit a moderator; reputation is affected only where the moderator is honoured; Atlas and the Official room can delist a space | Within its own space the moderator has the final say. There is no appeal above it |
+| Sold or stolen key | Buy a high-reputation key and spend it on false reports | Losses exceed gains, so a few restores empty it; open reports per key are capped | Honest reporters who make a mistake lose more than they would under a symmetric rule |
+| Farm-then-spend | Earn reputation with true reports, then spend it on false ones | Earning it means getting real bad content removed; losses exceed gains and open reports are capped, so the reputation can be spent about once | The farmed reputation can still hide some legitimate items once, until restored |
+| Linkability | Correlate a reporter's activity across spaces through their ghost key | Report reasons are encrypted to the moderator; users may use a separate ghost key per space or context | A separate key has no reputation from the others. Users choose between privacy and standing |
+| Proof-of-work flood | Hide items with many cheap proof-of-work reports | Proof-of-work reports have a low fixed weight and a cap per item, so they cannot hide an item on their own | Users without a ghost key have little influence, and a genuine crowd of them saturates the cap |
+| No moderator | Grief a space whose moderator is absent | Atlas can require a working moderator, visible from the space's manifest and its public rulings, before listing a space | In such a space a false hide is permanent and nothing is removed |
+| Ghost-key mint | Compromise the mint, or have it issue keys freely, to mint unlimited weight | The mint's blind signatures mean it cannot link keys to people even if compromised; keys from it still start with low weight and earn reputation only through rulings | The mint is the one central element. If it issued keys freely, Sybil resistance would fall back to reputation alone. Honouring more than one mint is a possible later step |
 
 ### Removal
 
@@ -239,16 +281,16 @@ assumptions as it can about how an app is built.
   reference is opaque to the system; a digest of at least 128 bits is
   recommended, so that nobody can make two items share one. A hash of the
   content is optional: it makes sense for media, where it also blocks
-  re-uploads, but not for text or encrypted content.
+  re-uploads within the space, but not for text or encrypted content.
 - **Subjects at more than one level.** A report or ruling can be about an
   item, a whole space (a room, a site), a contract, or a publisher's key.
   Atlas, for example, needs to act on whole apps, not single files.
 - **A moderation manifest.** A small record, signed by the space's owner key,
   naming where reports go, where rulings are published, which moderation keys
-  are authorised, and the space's policy (hiding threshold, waiting period).
-  Indexes such as Atlas can then check mechanically that an app has a working
-  removal mechanism, and measure from the public rulings how promptly it is
-  used.
+  are authorised, the space's policy (hiding threshold, waiting period), and
+  any suggested honour list. Indexes such as Atlas can then check
+  mechanically that an app has a working removal mechanism, and measure from
+  the public rulings how promptly it is used.
 - **Where moderators are authorised.** In the manifest, or in the app's own
   owner-signed state, as a River room's configuration would hold it. Either
   way the shared crate does the checking.
@@ -263,7 +305,7 @@ assumptions as it can about how an app is built.
   at them.
 - Removal from the network, where the app accepts tombstones, and real-time
   updates in every open UI.
-- Reporters' reputation from every app, from day one.
+- Reporters' reputation from every issuer the app or user honours.
 
 ### What an app does
 
@@ -274,7 +316,8 @@ assumptions as it can about how an app is built.
 3. **Adds the UI components**: the report flow, hiding, placeholders and the
    moderator queue. A Rust library comes first (River's UI is Dioxus), then a
    TypeScript package.
-4. **Chooses whose rulings count toward reputation**, or accepts the default.
+4. **Chooses whose rulings count toward reputation**: only the space's own
+   moderators (the default), or a visible suggested list.
 
 The app writes no delegate.
 
@@ -323,66 +366,49 @@ The app writes no delegate.
   expensive as histories grow. Issuers should publish compact, signed
   reputation summaries for UIs to read instead.
 
-## Sharing removal decisions across apps (draft, possibly not v1)
+## Sharing removal decisions across apps (deferred)
 
-When a moderator removes something as illegal, the decision can be published
-as a claim, so other apps that honour that moderator can block re-uploads of
-the same file.
+Blocking a re-upload of removed material in other apps would be useful, but it
+is not in v1, because every form we have found needs either an online service
+or a public list, and a public list does harm:
 
-- **Content is identified by a hash of its bytes**, not by where it is stored.
-  That works however an app stores media, matches the same file across apps,
-  and survives contract re-keys.
-- **The list must never become a directory of illegal material.** Hashing the
-  subject is not enough: Freenet content can be crawled, so anyone could hash
-  what they find and test it against a public list. Checks therefore need to be
-  online and rate-limited, for example with an oblivious PRF (as in Google's
-  Password Checkup): the checker learns whether an item it already holds is
-  listed, the service learns neither the item nor the result, and nobody can
-  enumerate the list.
-- **Checks happen where the moderator is, not where every reader is.** For
-  River, the room owner's node checks new and recent media in the room. Check
-  volume then follows uploads, not views.
-- **Private spaces are partly covered.** In an encrypted space, such as a
-  private River room, the owner's node holds the decrypted bytes and can run
-  exact-hash checks without revealing anything to the service.
+- **A public list of content hashes can be tested by anyone.** Freenet content
+  can be crawled, so anyone could hash what they find and check it against the
+  list. For apps that can only hide, the list would point at material that is
+  still retrievable. For uploaders, it would show which files are already
+  known, so they could alter those before uploading.
+- **Keeping the list private needs a service.** A rate-limited online check
+  (for example an oblivious PRF) avoids both problems, but someone has to run
+  it, which this design rules out.
+- **Exact hashes are easy to evade.** Changing one byte gives a new hash.
+  Perceptual hashes resist that but must never be published, since they can
+  leak image content and can be deliberately collided.
 
-## Automatic checking (later)
+Within one space, a content-hash item reference already blocks re-uploads of
+the same file. Across spaces, a moderator who honours another moderator's
+issuer can act on that moderator's rulings when the same item reference
+appears. That reuses the existing honour mechanism, and needs no new list.
 
-An earlier draft had a checking service, operated by Freenet Project Inc.,
-that fetched reported items and matched them against NCMEC's lists of known
-material (PDQ and MD5 hashes, using Meta's open-source
-[Hasher-Matcher-Actioner](https://github.com/facebook/ThreatExchange/tree/main/hasher-matcher-actioner)).
-On a match it would tombstone the item within seconds, file a CyberTipline
-report automatically, and preserve the file for a year, encrypted to an offline
-key split among trustees.
+## Considered and rejected
 
-It is set aside because fetching and keeping the material brings US legal
-duties and questions that need answers before we build it: whether the
-operator counts as a "provider" under 18 U.S.C. §2258A, which would make
-fetching, reporting and preservation protected; and what NCMEC's hash-sharing
-terms allow. If those are resolved, it can be added as an extra layer that
-apps opt into, issuing rulings like any other honoured issuer. Notes from that
-design:
-
-- **Remove at the source, never publish a verdict feed.** A public list of
-  confirmed items would point at material it cannot remove.
-- **Act only on known material.** Classifiers for new material (Google's
-  Content Safety API, Thorn's Safer) require human review before acting on a
-  result, under the terms we found.
-- **A verdict list read through related contracts does not work.**
-  freenet-core resolves related contracts only when a contract is validated,
-  and never re-validates when the related contract changes, so peers that
-  merged an item before the verdict would keep it and never converge.
-- **Perceptual hashes must never be published.** They can leak image content
-  and can be deliberately collided, so matching happens only inside the
-  service.
+- **A central checking service** that fetches reported items and matches them
+  against known-material hash lists. It needs an operator accountable for
+  handling the material directly, which conflicts with the goal of a system
+  with no central service.
+- **A verdict list read through related contracts.** freenet-core resolves
+  related contracts only when a contract is validated, and never re-validates
+  when the related contract changes, so peers that merged an item before the
+  verdict would keep it and never converge.
+- **Disputes or counter-reports that unhide, or that lower reporters'
+  reputation directly.** Either would let the people who want illegal material
+  up keep it up, or burn the reputation of the people reporting it.
 
 ## Cost
 
 Reporting, hiding and rulings cost almost nothing to run: reports are small
-contract updates, and hiding and reputation are computed locally. Cross-app
-checks are cheap too: an oblivious PRF evaluation is about one elliptic-curve
-multiplication, so a million checks costs about a minute of CPU.
+contract updates, and hiding and reputation are computed locally. Automatic
+confirmation is a scheduled wake-up of the moderator's own delegate. Nothing
+runs on shared servers.
 
 ## Open questions
 
@@ -391,15 +417,15 @@ multiplication, so a million checks costs about a minute of CPU.
 - How long should the waiting period before automatic confirmation be? A
   hidden item stays on the network until it ends, so shorter is safer, but it
   must leave a wrongly reported uploader time to dispute.
-- How should a ghost key's base weight depend on its donation amount and age?
-  And how much reputation should a ruling add or take away?
+- What exactly should base weight be as a function of donation and activity
+  age, and where should the caps sit? How much should a ruling add, and how
+  much larger should a loss be than a gain?
 - How large should a proof-of-work report's weight be, and how many
   proof-of-work reports should count per item?
-- A reporter's ghost key is the same across apps, which is what makes
-  reputation carry, but it also makes reporting activity linkable. Is that
-  acceptable?
-- How are issuers discovered, and how does an app express "honour these
-  issuers" in a way users can inspect?
+- How are issuers discovered, and how does an app present a suggested honour
+  list so users can inspect and change it?
+- Should reputation decay over time, so a dormant high-reputation key is worth
+  less to buy or steal?
 - How is a moderation key revoked? A contract cannot read the clock, so if it
   stopped accepting a key's tombstones once the key was revoked, peers that
   saw a tombstone before the revocation would keep it and peers that saw it
@@ -407,7 +433,8 @@ multiplication, so a million checks costs about a minute of CPU.
   carries the authorisation it was signed under and stays valid for good,
   while clients refuse to deliver new tombstones from revoked keys.
 - How do reports work in encrypted spaces, where only members can see the item?
-- Should v1 include cross-app sharing of removal decisions?
+- Should apps be able to honour more than one ghost-key mint, and weight keys
+  by mint?
 - Which second consumer (Atlas reviews, seller ratings, spam lists) should the
   general claim format be designed against?
 
