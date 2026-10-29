@@ -389,6 +389,23 @@ the same file. Across spaces, a moderator who honours another moderator's
 issuer can act on that moderator's rulings when the same item reference
 appears. That reuses the existing honour mechanism, and needs no new list.
 
+## A standalone moderation dApp (optional, later)
+
+This is not in v1. In v1, moderation happens inside each app's own UI, through
+the shared components, so a moderator works where the content is.
+
+Because the report and rulings contracts are generic, keyed by each space's
+stable id and found through each space's manifest, a standalone moderation dApp
+is a natural later addition. It would give a moderator one queue across every
+space they look after, in any app, with restore and remove signed by the shared
+moderation delegate. Tombstones still reach the content, because any client of
+the app delivers them.
+
+It has limits. It cannot render every app's items (a River message or a Harvest
+photo needs that app's own code), so for a disputed item it hands off to the
+app. App-specific actions, such as banning an author, stay in the app. The
+trust-settings app suggested under "Reputation" could be the same dApp.
+
 ## Considered and rejected
 
 - **A central checking service** that fetches reported items and matches them
